@@ -1609,16 +1609,14 @@ void process_exit_wrapper( int status )
  *
  * Start the server and create the initial socket pair.
  */
-size_t server_init_process(void)
+void server_init_process( struct thread_data *data )
 {
     const char *arch = getenv( "WINEARCH" );
     const char *env_socket = getenv( "WINESERVERSOCKET" );
-    struct thread_data *data = get_thread_data();
     obj_handle_t version;
     unsigned int i;
     int ret, reply_pipe;
     struct sigaction sig_act;
-    size_t info_size;
 
     server_pid = -1;
     if (env_socket)
@@ -1697,8 +1695,8 @@ size_t server_init_process(void)
             obj_handle_t handle;
             pid               = reply->pid;
             data->tid         = reply->tid;
-            peb->SessionId    = reply->session_id;
-            info_size         = reply->info_size;
+            session_id        = reply->session_id;
+            startup_info_size = reply->info_size;
             server_start_time = reply->server_start;
             supported_machines_count = wine_server_reply_size( reply ) / sizeof(*supported_machines);
             if (reply->inproc_device)
@@ -1722,11 +1720,6 @@ size_t server_init_process(void)
     {
         if (arch && !strcmp( arch, "win32" ))
             fatal_error( "WINEARCH set to win32 but '%s' is a 64-bit installation.\n", config_dir );
-#ifndef _WIN64
-        data->teb->GdiBatchCount = PtrToUlong( (char *)data->teb - teb_offset );
-        data->teb->WowTebOffset  = -teb_offset;
-        wow_peb = (PEB64 *)((char *)peb - page_size);
-#endif
     }
     else
     {
@@ -1736,10 +1729,8 @@ size_t server_init_process(void)
             fatal_error( "WINEARCH set to %s but '%s' is a 32-bit installation.\n", arch, config_dir );
     }
 
-    set_thread_id( data );
-
     for (i = 0; i < supported_machines_count; i++)
-        if (supported_machines[i] == current_machine) return info_size;
+        if (supported_machines[i] == current_machine) return;
 
     fatal_error( "wineserver doesn't support the %04x architecture\n", current_machine );
 }
@@ -1982,7 +1973,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
     if (fd != -1) close( fd );
 
     if (ret != STATUS_INVALID_HANDLE || !handle) return ret;
-    if (!peb->BeingDebugged) return ret;
+    if (!peb || !peb->BeingDebugged) return ret;
     if (!NtQueryInformationProcess( NtCurrentProcess(), ProcessDebugPort, &port, sizeof(port), NULL) && port)
     {
         struct thread_data *data = get_thread_data();
